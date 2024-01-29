@@ -54,8 +54,8 @@ pub fn FdEventerEpoll(comptime EventData: type) type {
                 comptime { std.debug.assert(@sizeOf(os.linux.epoll_data) >= @sizeOf(EventData)); }
                 std.mem.copy(
                     u8,
-                    @as([*]u8, &event.data)[0 .. @sizeOf(@TypeOf(event.data))],
-                    @as([*]const u8, &data)[0 .. @sizeOf(EventData)],
+                    @as([*]u8, @ptrCast(&event.data))[0 .. @sizeOf(@TypeOf(event.data))],
+                    @as([*]const u8, @ptrCast(&data))[0 .. @sizeOf(EventData)],
                 );
             }
             try os.epoll_ctl(self.epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &event);
@@ -72,7 +72,7 @@ pub fn FdEventerEpoll(comptime EventData: type) type {
             std.debug.assert(@alignOf(Event) == @alignOf(os.linux.epoll_event));
         }
         pub fn wait(self: Self, comptime MaxCount: usize, events: *[MaxCount]Event) !usize {
-            const count = os.epoll_wait(self.epoll_fd, events, -1);
+            const count = os.epoll_wait(self.epoll_fd, @ptrCast(events), -1);
             std.debug.assert(count != 0); // should be impossible since we have no timeout
             return count;
         }
