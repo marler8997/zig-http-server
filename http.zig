@@ -39,11 +39,11 @@ pub const UriLine = struct {
         return request[self.method_len + 1 .. self.uri_limit];
     }
     pub fn end(self: UriLine) usize {
-        return @intCast(usize, self.uri_limit) + 1 + http_version.len;
+        return @as(usize, self.uri_limit) + 1 + http_version.len;
     }
 };
 pub fn parseUriLine(request: []const u8) ParseUriLineError!UriLine {
-    const request_limit = std.math.min(request.len, std.math.maxInt(u16));
+    const request_limit = @min(request.len, std.math.maxInt(u16));
 
     var offset : u16 = 0;
     while (true) : (offset += 1) {
@@ -52,7 +52,7 @@ pub fn parseUriLine(request: []const u8) ParseUriLineError!UriLine {
     }
     if (offset > std.math.maxInt(u8))
         return error.MethodTooLong;
-    const method_len = @intCast(u8, offset);
+    const method_len: u8 = @intCast(offset);
     offset += 1;
 
     while (true) : (offset += 1) {
@@ -62,7 +62,7 @@ pub fn parseUriLine(request: []const u8) ParseUriLineError!UriLine {
     const uri_limit = offset;
 
     offset += 1;
-    const headers_start = @intCast(usize, offset) + http_version.len;
+    const headers_start = @as(usize, offset) + http_version.len;
     if (headers_start > request_limit)
         return error.Unfinished;
     if (!std.mem.eql(u8, request[offset..headers_start], http_version))

@@ -54,8 +54,8 @@ pub fn FdEventerEpoll(comptime EventData: type) type {
                 comptime { std.debug.assert(@sizeOf(os.linux.epoll_data) >= @sizeOf(EventData)); }
                 std.mem.copy(
                     u8,
-                    @ptrCast([*]u8, &event.data)[0 .. @sizeOf(@TypeOf(event.data))],
-                    @ptrCast([*]const u8, &data)[0 .. @sizeOf(EventData)],
+                    @as([*]u8, &event.data)[0 .. @sizeOf(@TypeOf(event.data))],
+                    @as([*]const u8, &data)[0 .. @sizeOf(EventData)],
                 );
             }
             try os.epoll_ctl(self.epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &event);
@@ -64,7 +64,7 @@ pub fn FdEventerEpoll(comptime EventData: type) type {
         pub const Event = extern struct {
             _epoll_event: os.linux.epoll_event,
             pub fn data(self: *Event) *align(1) EventData {
-                return @ptrCast(*align(1) EventData, &self._epoll_event.data);
+                return @ptrCast(&self._epoll_event.data);
             }
         };
         comptime {
@@ -72,7 +72,7 @@ pub fn FdEventerEpoll(comptime EventData: type) type {
             std.debug.assert(@alignOf(Event) == @alignOf(os.linux.epoll_event));
         }
         pub fn wait(self: Self, comptime MaxCount: usize, events: *[MaxCount]Event) !usize {
-            const count = os.epoll_wait(self.epoll_fd, @ptrCast(*[MaxCount]os.linux.epoll_event, events), -1);
+            const count = os.epoll_wait(self.epoll_fd, events, -1);
             std.debug.assert(count != 0); // should be impossible since we have no timeout
             return count;
         }
@@ -117,7 +117,7 @@ const windows = struct {
         count: usize,
         array: [0]os.socket_t,
         pub fn fd_ptr(self: *FdSet) [*]os.socket_t {
-            return @ptrCast([*]os.socket_t, &self.array);
+            return @ptrCast(&self.array);
         }
         pub fn fd_slice(self: *FdSet) []os.socket_t {
             return self.fd_ptr()[0 .. self.count];
@@ -140,7 +140,7 @@ const windows = struct {
         fn allocatedSlice(self: FdListUnmanaged) []u8 {
             std.debug.assert(self.socket_capacity > 0);
             const byte_len = fd_set_array_offset + @sizeOf(os.socket_t) * self.socket_capacity;
-            return @ptrCast([*]u8, self.set)[0 .. byte_len];
+            return @as([*]u8, @ptrCast(self.set))[0 .. byte_len];
         }
 
         pub fn add(
@@ -179,7 +179,7 @@ const windows = struct {
                 // success
             } else {
                 const new_memory = try allocator.alignedAlloc(u8, @alignOf(FdSet), new_byte_capacity);
-                const new_set = @ptrCast(*FdSet, new_memory.ptr);
+                const new_set: *FdSet = @ptrCast(new_memory.ptr);
                 if (self.socket_capacity > 0) {
                     new_set.count = self.set.count;
                     std.mem.copy(os.socket_t, new_set.fd_slice(), self.set.fd_slice());

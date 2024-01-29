@@ -105,7 +105,7 @@ pub fn sendHttpResponseFile(
     var buf: [std.mem.page_size]u8 = undefined;
     var remaining = file_size;
     while (remaining > 0) {
-        const next_len = std.math.min(remaining, buf.len);
+        const next_len = @min(remaining, buf.len);
 
         // TODO: handle errors better
         const len = try file.read(&buf);
@@ -129,7 +129,7 @@ pub fn writeSock(sock: std.os.socket_t, buf: []const u8) !usize {
     if (builtin.os.tag == .windows) {
         const result = std.os.windows.sendto(sock, buf.ptr, buf.len, 0, null, 0);
         if (result != std.os.windows.ws2_32.SOCKET_ERROR)
-            return @intCast(usize, result);
+            return @intCast(result);
         switch (std.os.windows.ws2_32.WSAGetLastError()) {
             else => |err| return std.os.windows.unexpectedWSAError(err),
         }
@@ -140,7 +140,7 @@ pub fn readSock(sock: std.os.socket_t, buf: []u8, flags: u32) !usize {
     if (builtin.os.tag == .windows) {
         const result = std.os.windows.recvfrom(sock, buf.ptr, buf.len, flags, null, null);
         if (result != std.os.windows.ws2_32.SOCKET_ERROR)
-            return @intCast(usize, result);
+            return @intCast(result);
         switch (std.os.windows.ws2_32.WSAGetLastError()) {
             .WSAECONNRESET => return error.ConnectionResetByPeer,
             else => |err| return std.os.windows.unexpectedWSAError(err),
