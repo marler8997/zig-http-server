@@ -61,6 +61,11 @@ pub fn FdEventerEpoll(comptime EventData: type) type {
             try os.epoll_ctl(self.epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &event);
         }
 
+        pub fn closeAndRemove(self: Self, fd: os.fd_t) void {
+            _ = self;
+            shutCloseSock(fd);
+        }
+
         pub const Event = extern struct {
             _epoll_event: os.linux.epoll_event,
             pub fn data(self: *Event) *align(1) EventData {
@@ -137,6 +142,10 @@ const windows = struct {
             }
         }
 
+        pub fn clearRetainingCapacity(self: *FdListUnmanaged) void {
+            self.set.count = 0;
+        }
+
         fn allocatedSlice(self: FdListUnmanaged) []u8 {
             std.debug.assert(self.socket_capacity > 0);
             const byte_len = fd_set_array_offset + @sizeOf(os.socket_t) * self.socket_capacity;
@@ -206,6 +215,11 @@ const windows = struct {
     ) callconv(os.windows.WINAPI) c_int;
 };
 
+pub fn shutCloseSock(sock: std.os.socket_t) void {
+    std.os.shutdown(sock, .both) catch {};
+    std.os.close(sock);
+}
+
 pub fn FdEventerSelectWindows(comptime EventData: type) type {
     return struct {
         const Self = @This();
@@ -240,13 +254,26 @@ pub fn FdEventerSelectWindows(comptime EventData: type) type {
             try self.fd_map.put(self.arena.allocator(), fd, data);
         }
 
+        pub fn closeAndRemove(self: *Self, fd: os.socket_t) void {
+            for (self.fds.items, 0..) |current_fd, i| {
+                if (current_fd.fd == fd) {
+                    _ = self.fds.orderedRemove(i);
+                    shutCloseSock(fd);
+                    return;
+                }
+            }
+            std.debug.panic("closeAndRemove called on socket {} that was not added", .{@intFromPtr(fd)});
+        }
+
         pub const Event = extern struct {
             _event_data: EventData,
             pub fn data(self: *Event) *align(1) EventData {
                 return &self._event_data;
             }
         };
+
         pub fn wait(self: *Self, comptime MaxCount: usize, events: *[MaxCount]Event) !usize {
+            self.read_fd_set.clearRetainingCapacity();
             for (self.fds.items) |fd| {
                 switch (fd.events) {
                     .read => try self.read_fd_set.add(self.arena.allocator(), fd.fd),

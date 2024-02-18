@@ -149,7 +149,7 @@ pub fn main() !void {
     }
 }
 
-fn fmtSock(s: std.os.socket_t) usize {
+fn fmtSock(s: std.os.socket_t) if (builtin.os.tag == .windows) usize else std.os.socket_t {
     if (builtin.os.tag == .windows) return @intFromPtr(s);
     return s;
 }
@@ -176,6 +176,7 @@ const ListenHandler = struct {
         errdefer self.gpa.allocator().destroy(new_handler);
         new_handler.* = .{
             .sock = new_sock,
+            .eventer = self.eventer,
             .gpa = self.gpa,
         };
         try self.eventer.add(new_sock, .read, &new_handler.base);
@@ -188,12 +189,12 @@ const max_request_header_len = 4096 * 100;
 const DataHandler = struct {
     base: Handler = .{ .onReady = onReady },
     sock: std.os.socket_t,
+    eventer: *FdEventer,
     gpa: *Gpa,
     al: std.ArrayListUnmanaged(u8) = .{},
     pub fn deinit(self: *DataHandler) void {
-        // TODO: does the eventer need to know we've been closed?
         std.log.info("s={}: shutdown/close", .{fmtSock(self.sock)});
-        server.shutCloseSock(self.sock);
+        self.eventer.closeAndRemove(self.sock);
         self.al.deinit(self.gpa.allocator());
         self.gpa.allocator().destroy(self);
     }
