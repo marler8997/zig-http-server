@@ -14,6 +14,10 @@ var global_root_dir: [:0]const u8 = undefined;
 pub fn oom(e: error{OutOfMemory}) noreturn {
     @panic(@errorName(e));
 }
+fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
+    std.log.err(fmt, args);
+    std.os.exit(0xff);
+}
 
 const log_to_stdout = false;
 var stdout_mutex = if (log_to_stdout) std.Thread.Mutex{} else void;
@@ -53,19 +57,49 @@ pub fn main() !void {
         }
     }
 
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const all_args = try std.process.argsAlloc(arena.allocator());
     if (all_args.len <= 1) {
-        try std.io.getStdErr().writer().writeAll("Usage: fileserver ROOT_PATH\n");
+        try std.io.getStdErr().writer().writeAll(
+            "Usage: fileserver [-options] ROOT_PATH\n" ++
+            "    --port PORT   (defaults to 8080)\n" ++
+            "    --address IP  (e.g. 0.0.0.0, defaults to 127.0.0.1)\n"
+        );
         std.os.exit(0xff);
     }
-    const args = all_args[1..];
-    if (args.len != 1) {
-        std.log.err("expected 1 cmdline argument but got {}", .{args.len});
-        std.os.exit(0xff);
-    }
-    global_root_dir = args[0];
+
+    var opt: struct {
+        port: ?u16 = null,
+        listen_addr: ?[]const u8 = null,
+    } = .{};
+    const non_option_args = blk: {
+        const args = all_args[1..];
+        var arg_index: usize = 0;
+        var non_option_arg_count: usize = 0;
+        while (arg_index < args.len) : (arg_index += 1) {
+            const arg = args[arg_index];
+            if (!std.mem.startsWith(u8, arg, "-")) {
+                args[non_option_arg_count] = arg;
+                non_option_arg_count += 1;
+            } else if (std.mem.eql(u8, arg, "--port")) {
+                arg_index += 1;
+                if (arg_index >= args.len) fatal("--port requires an argument", .{});
+                const port_string = args[arg_index];
+                opt.port = std.fmt.parseInt(u16, port_string, 10) catch |err|
+                    fatal("invalid --port '{s}' ({s})", .{port_string, @errorName(err)});
+            } else if (std.mem.eql(u8, arg, "--address")) {
+                arg_index += 1;
+                if (arg_index >= args.len) fatal("--address requires an argument", .{});
+                opt.listen_addr = args[arg_index];
+            } else fatal("unknown cmdline option '{s}'", .{arg});
+        }
+        break :blk args[0..non_option_arg_count];
+    };
+    if (non_option_args.len == 0)
+        fatal("missing required cmdline argument ROOT_PATH", .{});
+    if (non_option_args.len != 1)
+        fatal("{} too many cmdline args", .{non_option_args.len - 1});
+    global_root_dir = non_option_args[0];
     {
         var dir_or_err = std.fs.cwd().openDir(global_root_dir, .{});
         if (dir_or_err) |*dir| {
@@ -79,13 +113,21 @@ pub fn main() !void {
     var gpa = Gpa{};
     defer _ = gpa.deinit();
 
-    // TODO: support custom listen address
-    //const port = 80;
-    const port = 8080;
-    const listen_addr = try std.net.Address.parseIp("0.0.0.0", port);
-    std.log.info("listen address is {}", .{listen_addr});
+    const port = if (opt.port) |p| p else 8080;
+    const listen_addr_string = if (opt.listen_addr) |a| a else "127.0.0.1";
+    const listen_addr = std.net.Address.parseIp(listen_addr_string, port) catch |err|
+        fatal("invalid --addr '{s}' ({s})", .{listen_addr_string, @errorName(err)});
+
     const listen_sock = try server.createListenSock(listen_addr);
     // no need to close
+    if (port == 0) {
+        var addr: std.net.Address = undefined;
+        var addr_len: std.os.socklen_t = @sizeOf(@TypeOf(addr));
+        try std.os.getsockname(listen_sock, &addr.any, &addr_len);
+        std.log.info("listening at {}", .{addr});
+    } else {
+        std.log.info("listening at {}", .{listen_addr});
+    }
 
     var eventer = try FdEventer.init();
     defer eventer.deinit();
