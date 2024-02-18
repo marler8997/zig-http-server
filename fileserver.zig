@@ -9,6 +9,8 @@ const FdEventer = fdeventer.FdEventer(*Handler);
 
 const Gpa = std.heap.GeneralPurposeAllocator(.{});
 
+var global_root_dir: [:0]const u8 = undefined;
+
 pub fn oom(e: error{OutOfMemory}) noreturn {
     @panic(@errorName(e));
 }
@@ -52,17 +54,27 @@ pub fn main() !void {
     }
 
 
-    //var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-//    const all_args = try std.process.argsAlloc(arena.allocator());
-//    if (all_args.len <= 1) {
-//        try std.io.getStdErr().writer().writeAll("Usage: webserver ROOT_PATH\n");
-//        std.os.exit(0xff);
-//    }
-//    const args = all_args[1..];
-//    if (args.len != 1) {
-//        std.log.err("expected 1 cmdline argument but got {}", .{args.len});
-//        std.os.exit(0xff);
-//    }
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const all_args = try std.process.argsAlloc(arena.allocator());
+    if (all_args.len <= 1) {
+        try std.io.getStdErr().writer().writeAll("Usage: fileserver ROOT_PATH\n");
+        std.os.exit(0xff);
+    }
+    const args = all_args[1..];
+    if (args.len != 1) {
+        std.log.err("expected 1 cmdline argument but got {}", .{args.len});
+        std.os.exit(0xff);
+    }
+    global_root_dir = args[0];
+    {
+        var dir_or_err = std.fs.cwd().openDir(global_root_dir, .{});
+        if (dir_or_err) |*dir| {
+            dir.close();
+        } else |err| switch (err) {
+            error.FileNotFound => std.log.warn("root path '{s}' does not exist", .{global_root_dir}),
+            else => std.log.warn("failed to open root path '{s}' with {s}", .{global_root_dir, @errorName(err)}),
+        }
+    }
 
     var gpa = Gpa{};
     defer _ = gpa.deinit();
@@ -261,7 +273,12 @@ fn handleRequest(
     std.debug.assert(path[0] == '/');
     const path_relative = path[1..];
 
-    const file = std.fs.cwd().openFile(path_relative, .{}) catch |err| switch (err) {
+    var dir = std.fs.cwd().openDir(global_root_dir, .{}) catch |err| switch (err) {
+        else => |e| return e,
+    };
+    defer dir.close();
+
+    const file = dir.openFile(path_relative, .{}) catch |err| switch (err) {
         error.FileNotFound => {
             try server.sendHttpResponseNoContent(sock, opt, "404 Not Found");
             return .can_keep_alive;
@@ -269,7 +286,7 @@ fn handleRequest(
         else => |e| return e,
     };
     defer file.close();
-    
+
     try server.sendHttpResponseFile(file, sock, opt, path);
     return .can_keep_alive;
 }
