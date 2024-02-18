@@ -1,5 +1,4 @@
 const std = @import("std");
-const GitRepoStep = @import("GitRepoStep.zig");
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
