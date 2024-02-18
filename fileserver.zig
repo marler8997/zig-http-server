@@ -149,6 +149,11 @@ pub fn main() !void {
     }
 }
 
+fn fmtSock(s: std.os.socket_t) usize {
+    if (builtin.os.tag == .windows) return @intFromPtr(s);
+    return s;
+}
+
 pub const Handler = struct {
     onReady: *const fn(handler: *Handler) anyerror!void,
 };
@@ -166,7 +171,7 @@ const ListenHandler = struct {
         const new_sock = try std.os.accept(self.sock, &from.any, &fromlen, 0);
         // TODO: do we ened to tell eventer that we closed the socket?
         errdefer server.shutCloseSock(new_sock);
-        std.log.info("s={}: got new connection from {}", .{new_sock, from});
+        std.log.info("s={}: got new connection from {}", .{fmtSock(new_sock), from});
         const new_handler = try self.gpa.allocator().create(DataHandler);
         errdefer self.gpa.allocator().destroy(new_handler);
         new_handler.* = .{
@@ -187,7 +192,7 @@ const DataHandler = struct {
     al: std.ArrayListUnmanaged(u8) = .{},
     pub fn deinit(self: *DataHandler) void {
         // TODO: does the eventer need to know we've been closed?
-        std.log.info("s={}: shutdown/close", .{self.sock});
+        std.log.info("s={}: shutdown/close", .{fmtSock(self.sock)});
         server.shutCloseSock(self.sock);
         self.al.deinit(self.gpa.allocator());
         self.gpa.allocator().destroy(self);
@@ -202,24 +207,24 @@ const DataHandler = struct {
         // TODO: maybe handle some of these errors
         const received = server.readSock(self.sock, self.al.unusedCapacitySlice(), 0) catch |err| switch (err) {
             error.ConnectionResetByPeer => {
-                std.log.info("s={}: connection reset", .{self.sock});
+                std.log.info("s={}: connection reset", .{fmtSock(self.sock)});
                 self.deinit();
                 return;
             },
             else => |e| return e,
         };
         if (received == 0) {
-            std.log.info("s={}: closed", .{self.sock});
+            std.log.info("s={}: closed", .{fmtSock(self.sock)});
             self.deinit();
             return;
         }
 
         self.al.items.len += received;
-        std.log.info("s={}: got {} bytes", .{self.sock, received});
+        std.log.info("s={}: got {} bytes", .{fmtSock(self.sock), received});
 
         const end_of_headers = http.findEndOfHeaders(self.al.items, received) orelse {
             if (self.al.items.len > max_request_header_len) {
-                std.log.info("s={}: headers exceeded max len {}, closing", .{self.sock, max_request_header_len});
+                std.log.info("s={}: headers exceeded max len {}, closing", .{fmtSock(self.sock), max_request_header_len});
                 self.deinit();
             }
             return;
@@ -242,14 +247,14 @@ const DataHandler = struct {
         };
         var content_len: usize = 0;
 
-        //std.log.info("s={}: ------------- GET '{s}' -----------------", .{self.sock, uri_line.uri(request)});
+        //std.log.info("s={}: ------------- GET '{s}' -----------------", .{fmtSock(self.sock), uri_line.uri(request)});
         var header_it = http.HeaderIterator{ .headers = headers };
         while (header_it.next() catch |err| {
             try server.sendHttpResponse(self.sock, .{ .keep_alive = false }, "400 Bad Request", .text, @errorName(err));
             self.deinit();
             return;
         }) |header| {
-            //std.log.info("s={}: {s}: {s}", .{self.sock, header.name, header.value});
+            //std.log.info("s={}: {s}: {s}", .{fmtSock(self.sock), header.name, header.value});
             if (std.ascii.eqlIgnoreCase(header.name, "connection")) {
                 if (std.mem.eql(u8, header.value, "keep-alive")) {
                     request_options.keep_alive = true;
@@ -265,7 +270,7 @@ const DataHandler = struct {
                 @panic("todo");
             }
         }
-        //std.log.info("s={}: ---------------------------------------", .{self.sock});
+        //std.log.info("s={}: ---------------------------------------", .{fmtSock(self.sock)});
 
         if (content_len > 0) {
             @panic("todo: non-zero content-length");
