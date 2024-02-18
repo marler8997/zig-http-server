@@ -49,14 +49,6 @@ pub fn main() !void {
             std.os.close(1); // we don't need stdout
             // we do want stderr cause zig logs things there
         }
-
-        // disable SIGPIPE (TODO: zig will do this automatically after my PR is released)
-        const act = std.os.Sigaction{
-            .handler = .{ .handler = std.os.SIG.IGN },
-            .mask = std.os.empty_sigset,
-            .flags = std.os.SA.SIGINFO,
-        };
-        try std.os.sigaction(std.os.SIG.PIPE, &act, null);
     }
 
 
